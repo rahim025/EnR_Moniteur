@@ -1,0 +1,19 @@
+{
+  "appId": "com.enrmoniteur.app",
+  "appName": "EnR Moniteur",
+  "webDir": "www",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": ["google.com"]
+    }
+  },
+  "server": {
+    "url": "https://rahim025.github.io/EnR-Moniteur/",
+    "androidScheme": "https",
+    "allowNavigation": ["rahim025.github.io"]
+  },
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}
