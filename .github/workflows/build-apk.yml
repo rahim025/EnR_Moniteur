@@ -76,6 +76,28 @@ jobs:
           }
           EOF
 
+      - name: Préparer la clé de signature
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p keystore
+          rm -f keystore/debug.keystore
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Clé fixe trouvée dans le secret DEBUG_KEYSTORE_BASE64."
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > keystore/debug.keystore
+          else
+            echo "Pas de secret : génération d'une clé temporaire (SHA-1 différent à chaque build)."
+            keytool -genkeypair -v \
+              -keystore keystore/debug.keystore \
+              -storepass android -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          echo "=== Empreintes de la clé (à ajouter dans Firebase) ==="
+          keytool -list -v -keystore keystore/debug.keystore \
+            -storepass android -alias androiddebugkey | grep -E "SHA1|SHA256"
+
       - name: Construire l'APK
         working-directory: android
         run: ./gradlew assembleDebug
