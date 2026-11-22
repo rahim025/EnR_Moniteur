@@ -9,7 +9,7 @@
     }
   },
   "server": {
-    "url": "https://rahim025.github.io/EnR-Moniteur/",
+    "url": "https://rahim025.github.io/EnR_Moniteur/",
     "androidScheme": "https",
     "allowNavigation": ["rahim025.github.io"]
   },
