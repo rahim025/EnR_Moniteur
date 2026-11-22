@@ -1,1 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1720">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>EnR Moniteur</title>
+<style>
+:root{--bg:#fff;--fg:#14202b;--mut:#5b6b7a;--card:#f1f4f8;--bd:#d9e0e8;--rouge:#d92d20;--orange:#d97706;--bleu:#2563eb;--vert:#1a9b57;box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f1720;--fg:#e8eef5;--mut:#9fb0c1;--card:#18222e;--bd:#2a3746}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f1720;--fg:#e8eef5;--mut:#9fb0c1;--card:#18222e;--bd:#2a3746}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{max-width:680px;margin:0 auto;padding:16px 14px 40px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+h1{font-size:1.3rem;margin:0}
+.pt{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--mut);margin-right:6px}
+.pt.on{background:var(--vert)}
+.sub{color:var(--mut);font-size:.85rem;margin:2px 0 0}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--bleu);color:#fff;border:0;border-radius:12px;padding:13px 16px;font-weight:600;width:100%}
+.petit{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:8px 12px;font-size:.85rem;font-weight:600}
+.centre{text-align:center;padding:40px 8px}
+.compte{display:flex;gap:8px;margin:14px 0}
+.compte div{flex:1;background:var(--card);border-radius:10px;padding:10px 4px;text-align:center;font-size:.75rem;color:var(--mut)}
+.compte b{display:block;font-size:1.35rem;color:var(--fg)}
+.filtres{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px}
+.filtres .petit.on{background:var(--bleu);color:#fff;border-color:var(--bleu)}
+.carte{background:var(--card);border:1px solid var(--bd);border-left:5px solid var(--rouge);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.carte.promesse{border-left-color:var(--orange)}.carte.console{border-left-color:var(--bleu)}
+.carte .t{word-break:break-word;font-size:.92rem}
+.carte .m{color:var(--mut);font-size:.75rem;margin-top:4px}
+.det{margin-top:8px;font-size:.78rem;color:var(--mut)}
+.det div{padding:3px 0;border-top:1px solid var(--bd)}
+.act{display:flex;gap:6px;margin-top:8px}
+.bas{display:flex;gap:8px;margin-top:14px}
+.bas .petit{flex:1}
+</style>
+</head>
+<body>
+<main id="app"><div class="centre">Chargement…</div></main>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithCredential,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import {initializeFirestore,collection,query,orderBy,limit,onSnapshot,doc,getDoc,writeBatch} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
+// Même projet Firebase que EnR Connect (ces valeurs sont publiques, la sécurité vient des règles Firestore)
+const app=initializeApp({
+  apiKey:"AIzaSyAdu0H-U1o7A9v5nDAMToehJnAzQrB75Io",
+  authDomain:"ene-connect.firebaseapp.com",
+  projectId:"ene-connect",
+  messagingSenderId:"650182344597",
+  appId:"1:650182344597:web:abf4c2f781bb693421409c"
+});
+const auth=getAuth(app);
+const db=initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
+const root=document.getElementById("app");
+
+let docs=[],filtre="tout",ouverts=new Set(),stop=null,enLigne=false;
+
+function h(tag,props={},...kids){
+  const e=document.createElement(tag);
+  for(const[k,v]of Object.entries(props)){
+    if(k==="class")e.className=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else e.setAttribute(k,v);
+  }
+  kids.flat().forEach(c=>{if(c!=null)e.append(c.nodeType?c:document.createTextNode(c))});
+  return e;
+}
+const heure=ms=>new Date(ms).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+const il=ms=>{const s=Math.max(0,(Date.now()-ms)/1000);if(s<60)return"à l’instant";if(s<3600)return"il y a "+Math.floor(s/60)+" min";if(s<86400)return"il y a "+Math.floor(s/3600)+" h";return"il y a "+Math.floor(s/86400)+" j"};
+
+function ecranConnexion(msg){
+  root.replaceChildren(h("div",{class:"centre"},
+    h("h1",{},"🩺 EnR Moniteur"),
+    h("p",{class:"sub"},"Les problèmes de l’appli EnR Connect, en direct. Réservé au créateur."),
+    msg?h("p",{style:"color:var(--rouge)"},msg):null,
+    h("div",{style:"height:16px"}),
+    h("button",{class:"btn",onclick:connexion},"Se connecter avec Google")
+  ));
+}
+// Dans l'appli Android, la connexion Google passe par le plugin natif (le navigateur intégré est refusé par Google)
+const natif=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+async function connexion(){
+  try{
+    if(natif){
+      const r=await window.Capacitor.Plugins.FirebaseAuthentication.signInWithGoogle();
+      const c=r.credential||{};
+      await signInWithCredential(auth,GoogleAuthProvider.credential(c.idToken,c.accessToken));
+    }else await signInWithPopup(auth,new GoogleAuthProvider());
+  }catch(e){ecranConnexion("Connexion impossible : "+(e.code||e.message||e))}
+}
+async function deconnexion(){
+  try{if(natif)await window.Capacitor.Plugins.FirebaseAuthentication.signOut()}catch{}
+  await signOut(auth);
+}
+async function estCreateur(email){
+  try{return(await getDoc(doc(db,"createurs",email.toLowerCase()))).exists()}catch{return false}
+}
+
+onAuthStateChanged(auth,async u=>{
+  if(stop){stop();stop=null}
+  if(!u){ecranConnexion();return}
+  root.replaceChildren(h("div",{class:"centre"},"Vérification…"));
+  if(!(await estCreateur(u.email||""))){
+    await signOut(auth);ecranConnexion("Seul le créateur d’EnR Connect peut voir ces problèmes.");return;
+  }
+  stop=onSnapshot(query(collection(db,"problemes"),orderBy("at","desc"),limit(300)),snap=>{
+    enLigne=true;
+    docs=snap.docs.map(d=>{const x=d.data();return{id:d.id,...x,ms:x.at&&x.at.toMillis?x.at.toMillis():Date.now()}});
+    document.title=(docs.length?"("+docs.length+") ":"")+"EnR Moniteur";
+    dessiner(u);
+  },err=>{enLigne=false;root.replaceChildren(h("div",{class:"centre"},"Lecture impossible : "+(err.code||err.message)+". Les règles Firestore sont-elles publiées ?"))});
+});
+
+function grouper(liste){
+  const g=new Map();
+  for(const d of liste){
+    const k=d.type+"|"+d.message;
+    if(!g.has(k))g.set(k,{type:d.type,message:d.message,items:[]});
+    g.get(k).items.push(d);
+  }
+  return[...g.values()].sort((a,b)=>b.items[0].ms-a.items[0].ms);
+}
+
+async function effacer(ids){
+  for(let i=0;i<ids.length;i+=400){
+    const b=writeBatch(db);ids.slice(i,i+400).forEach(id=>b.delete(doc(db,"problemes",id)));await b.commit();
+  }
+}
+
+function dessiner(u){
+  const auj=docs.filter(d=>Date.now()-d.ms<86400000).length;
+  const gens=new Set(docs.map(d=>d.uid)).size;
+  const groupes=grouper(docs.filter(d=>filtre==="tout"||d.type===filtre));
+  const copier=h("button",{class:"petit",onclick:async()=>{
+    const t="EnR Connect — problèmes\n\n"+groupes.map(g=>"["+g.type+"] ×"+g.items.length+" — "+g.message+"\n   "+[...new Set(g.items.map(i=>i.nom||"?"))].join(", ")+" · v"+[...new Set(g.items.map(i=>i.build))].join("/")).join("\n\n");
+    try{await navigator.clipboard.writeText(t);copier.textContent="Copié ✓"}catch{copier.textContent="Copie impossible"}
+  }},"Copier le rapport");
+  root.replaceChildren(
+    h("header",{},
+      h("div",{},h("h1",{},"🩺 EnR Moniteur"),h("p",{class:"sub"},h("span",{class:"pt"+(enLigne?" on":"")}),enLigne?"En direct":"Hors ligne")),
+      h("button",{class:"petit",onclick:deconnexion},"Quitter")
+    ),
+    h("div",{class:"compte"},
+      h("div",{},h("b",{},docs.length),"signalements"),
+      h("div",{},h("b",{},auj),"dernières 24 h"),
+      h("div",{},h("b",{},gens),"personnes touchées")
+    ),
+    h("div",{class:"filtres"},["tout","erreur","promesse","console"].map(f=>h("button",{class:"petit"+(filtre===f?" on":""),onclick:()=>{filtre=f;dessiner(u)}},f))),
+    groupes.length?groupes.map(g=>{
+      const k=g.type+"|"+g.message,ouvert=ouverts.has(k),d0=g.items[0];
+      return h("div",{class:"carte "+g.type},
+        h("div",{class:"t",onclick:()=>{ouvert?ouverts.delete(k):ouverts.add(k);dessiner(u)}},g.message),
+        h("div",{class:"m"},g.type+" · ×"+g.items.length+" · "+il(d0.ms)+" · "+(d0.plateforme||"?")+" v"+(d0.build||"?")),
+        ouvert?h("div",{class:"det"},g.items.slice(0,15).map(i=>h("div",{},heure(i.ms)+" · "+(i.nom||"?")+" · "+(i.plateforme||"?")+" · écran "+(i.ecran||"?")+(i.horsLigne?" · hors ligne":"")))):null,
+        h("div",{class:"act"},h("button",{class:"petit",onclick:async()=>{await effacer(g.items.map(i=>i.id))}},"✓ Réglé (supprimer)"))
+      );
+    }):h("div",{class:"centre"},"✅ Aucun problème signalé.",h("p",{class:"sub"},"Les erreurs apparaîtront ici dès qu’elles surviennent dans l’appli.")),
+    h("div",{class:"bas"},copier,
+      docs.length?h("button",{class:"petit",onclick:async()=>{if(confirm("Tout effacer ?"))await effacer(docs.map(d=>d.id))}},"Tout effacer"):null)
+  );
+}
+// Mise à jour automatique : le site est republié à chaque push (numéro __BUILD__ posé par le workflow).
+// Au lancement et au retour dans l'appli, on compare avec version.json et on recharge si le site est plus récent.
+const BUILD=Number("__BUILD__")||0;
+let derniereMaj=0;
+async function verifierMaj(){
+  if(!BUILD||!navigator.onLine||Date.now()-derniereMaj<60000)return;
+  derniereMaj=Date.now();
+  try{
+    const r=await fetch("version.json?t="+Date.now(),{cache:"no-store"});
+    if(!r.ok)return;
+    const{build}=await r.json();
+    if(build>BUILD)location.replace(location.pathname+"?v="+build);
+  }catch{}
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)verifierMaj()});
+setTimeout(verifierMaj,2500);
+setInterval(verifierMaj,5*60000);
+setInterval(()=>{const u=auth.currentUser;if(u&&docs.length)dessiner(u)},60000);
+</script>
+</body>
+</html>
