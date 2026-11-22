@@ -1,1 +1,91 @@
 
+name: Construire l'APK
+
+# L'APK n'est reconstruit que pour les changements natifs (icône, signature, config).
+# Les changements de l'interface passent par le site (site.yml) et arrivent tout seuls dans l'appli.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'assets/**'
+      - 'keystore/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Créer le projet Android
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          npx cap add android
+          npx @capacitor/assets generate --android
+          # Corrige « Your device doesn't support credential manager » (connexion Google)
+          sed -i "s/ext {/ext {\n    androidxCredentialsVersion = '1.3.0'\n    androidxCredentialsPlayServicesAuthVersion = '1.3.0'/" android/variables.gradle
+          cat >> android/build.gradle <<'EOF'
+
+          allprojects {
+              configurations.all {
+                  resolutionStrategy {
+                      force 'androidx.credentials:credentials:1.3.0'
+                      force 'androidx.credentials:credentials-play-services-auth:1.3.0'
+                  }
+              }
+          }
+          EOF
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          if ! grep -q "com.enrmoniteur.app" android/app/google-services.json; then
+            echo "ERREUR : google-services.json ne contient pas com.enrmoniteur.app."
+            echo "Ajoute l'appli Android com.enrmoniteur.app dans Firebase, retélécharge google-services.json et mets à jour le secret GOOGLE_SERVICES_JSON."
+            exit 1
+          fi
+          npx cap sync android
+          # Signature avec la clé fixe du dépôt (keystore/debug.keystore)
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile file("${rootProject.projectDir}/../keystore/debug.keystore")
+                      storePassword 'android'
+                      keyAlias 'androiddebugkey'
+                      keyPassword 'android'
+                  }
+              }
+          }
+          EOF
+
+      - name: Construire l'APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Renommer l'APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk EnR-Moniteur.apk
+
+      - name: Publier dans Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: EnR Moniteur v${{ github.run_number }}
+          files: EnR-Moniteur.apk
